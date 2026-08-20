@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+
+# Local credentials and persistent runtime data
+.agently-cli/
+data/
+oauth-clients.json
+
