@@ -1,6 +1,6 @@
 {
   "name": "agent-mail-cloud-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Stable cloud MCP action gateway for Tencent QQ Agent Mail",
   "license": "MIT",

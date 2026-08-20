@@ -64,10 +64,11 @@ If a client supports only legacy SSE, use `https://YOUR_HOST/sse`; it must send 
 
 Run `npm ci`, `npm run build`, and `npm test`. Then verify:
 
-- `/healthz` reports `agent-mail-gateway` v0.5.0;
+- `/healthz` reports `agent-mail-gateway` v0.5.1;
 - unauthenticated `/mcp` requests return 401;
 - mailbox identity still works without Tencent reauthorization;
 - `capabilities` returns the action catalog;
 - a named-token Streamable HTTP client lists exactly the same two tools;
 - a legacy SSE client authenticates both its event stream and message POST;
+- browser-webview preflight requests to MCP transport routes return the required CORS headers without authenticating an MCP request;
 - use only owner-controlled messages and attachments for real-mail smoke tests.

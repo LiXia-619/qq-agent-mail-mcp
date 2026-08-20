@@ -20,6 +20,7 @@ import type { AgentMailClient } from "./types.js";
 const SETUP_COOKIE = "agent_mail_setup";
 const SETUP_TTL_SECONDS = 30 * 60;
 const MAX_SSE_SESSIONS = 20;
+const MCP_TRANSPORT_PATHS = new Set(["/mcp", "/sse", "/messages"]);
 
 interface SetupSession {
   csrf: string;
@@ -142,6 +143,25 @@ function createGatewayExpressApp(config: AppConfig): Express {
       res.status(403).type("text/plain").send("Invalid Host header");
     }
   });
+  app.use((req, res, next) => {
+    if (!MCP_TRANSPORT_PATHS.has(req.path)) {
+      next();
+      return;
+    }
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Authorization, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID",
+    );
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
+    res.setHeader("Access-Control-Max-Age", "600");
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
   // Parse ordinary OAuth/setup JSON narrowly. The authenticated MCP route gets
   // its own larger parser later so binary attachments can be carried as base64.
   const smallJson = express.json({ limit: "64kb" });
@@ -220,7 +240,7 @@ export function createHttpApp(
   app.use(express.urlencoded({ extended: false, limit: "8kb" }));
 
   app.get("/healthz", (_req, res) => {
-    res.status(200).json({ ok: true, service: "agent-mail-gateway", version: "0.5.0" });
+    res.status(200).json({ ok: true, service: "agent-mail-gateway", version: "0.5.1" });
   });
 
   const privateLimiter = rateLimit({

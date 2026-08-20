@@ -4,7 +4,7 @@
 
 A single-owner, cloud-deployable MCP gateway for Tencent QQ Agent Mail. Tencent's official CLI remains the mailbox engine; this project is a remote adapter, not a second email client.
 
-Current gateway version: **v0.5.0**.
+Current gateway version: **v0.5.1**.
 
 ## Why this project exists
 
@@ -80,6 +80,7 @@ Credentials and the CLI's encryption-key locations all live on the persistent vo
 - Connector OAuth uses PKCE and Dynamic Client Registration. The existing `mail:read mail:reply` scope pair is retained for deployed-client compatibility; in v0.4, `mail:reply` is the legacy connector write grant and the approval page truthfully describes the full gateway.
 - Non-OAuth clients use independent, operator-provisioned bearer tokens. Tokens are compared by SHA-256 digest with timing-safe equality and are never returned by the MCP server.
 - Legacy SSE sessions are authenticated on both the event stream and message endpoint, capped at 20 concurrent sessions, and bound to the same named or OAuth client identity.
+- The three MCP transport routes answer browser CORS preflights so desktop webview clients can send Authorization headers. CORS does not bypass bearer authentication, and setup/OAuth routes do not receive wildcard CORS headers.
 - The official `@tencent-qqmail/agently-cli@1.0.17` package is pinned in the container image.
 
 This software can send, forward, trash, and permanently delete email when authorized. Review [`docs/SECURITY.md`](docs/SECURITY.md), use a dedicated single-owner deployment, and test with owner-controlled messages before granting access to real mail.

@@ -64,7 +64,7 @@ describe("HTTP security boundary", () => {
   it("exposes only a minimal health check", async () => {
     const app = createHttpApp(config, fakeMail, new FakeMailboxAuth());
     await request(app).get("/healthz").set("Host", "mail.example")
-      .expect(200, { ok: true, service: "agent-mail-gateway", version: "0.5.0" });
+      .expect(200, { ok: true, service: "agent-mail-gateway", version: "0.5.1" });
   });
 
   it("does not expose the mailbox authorization link before owner verification", async () => {
@@ -175,6 +175,36 @@ describe("HTTP security boundary", () => {
       .expect(401);
     await request(app).get("/sse").set("Host", "mail.example").expect(401);
     await request(app).post("/messages?sessionId=unknown").set("Host", "mail.example").expect(401);
+  });
+
+  it("answers browser preflights only on MCP transport routes without bypassing bearer auth", async () => {
+    const app = createHttpApp(config, fakeMail, new FakeMailboxAuth());
+    for (const path of ["/mcp", "/sse", "/messages"]) {
+      await request(app)
+        .options(path)
+        .set("Host", "mail.example")
+        .set("Origin", "http://localhost:3000")
+        .set("Access-Control-Request-Method", path === "/sse" ? "GET" : "POST")
+        .set("Access-Control-Request-Headers", "authorization,content-type,mcp-protocol-version")
+        .expect(204)
+        .expect("Access-Control-Allow-Origin", "*")
+        .expect("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        .expect("Access-Control-Allow-Headers", /Authorization/);
+    }
+    await request(app)
+      .post("/mcp")
+      .set("Host", "mail.example")
+      .set("Origin", "http://localhost:3000")
+      .send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
+      .expect(401)
+      .expect("Access-Control-Allow-Origin", "*");
+    await request(app)
+      .options("/setup")
+      .set("Host", "mail.example")
+      .set("Origin", "http://localhost:3000")
+      .expect((response) => {
+        expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+      });
   });
 
   it("serves the same two tools over Streamable HTTP and legacy SSE with a named bearer token", async () => {
