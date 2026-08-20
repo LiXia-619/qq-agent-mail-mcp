@@ -1,4 +1,4 @@
-# Security model — stable gateway v0.5
+# Security model — stable gateway v0.4
 
 This is an unofficial self-hosted project, not a Tencent-operated service. Each operator is the security administrator for their own deployment.
 
@@ -20,9 +20,6 @@ This is an unofficial self-hosted project, not a Tencent-operated service. Each 
 
 - Setup sessions, connector approval requests, and authorization codes live in process memory. Run one replica; restart cancels only in-progress authorization.
 - Connector tokens are signed and stateless. Rotate `OAUTH_SIGNING_SECRET` to revoke them.
-- Named non-OAuth client tokens are full mailbox gateway credentials. Use one random token per client, store them only in the host secret manager and that client, and remove one entry plus redeploy to revoke that client.
-- Legacy SSE keeps up to 20 authenticated sessions in process memory. Each message POST is rebound to the identity that opened its SSE stream; restarts close all sessions.
-- MCP transport routes allow cross-origin browser requests for desktop-webview compatibility, but never allow cookie credentials and still require a valid bearer token on every non-preflight request. Setup and OAuth routes are not covered by this CORS policy.
 - The owner code protects setup and connector approval. Keep it high entropy and private.
 - Base64 makes attachment requests larger in transit. The 30 MiB MCP parser is installed only after bearer authentication.
 - Hosting, volume, DNS/TLS, and Tencent's pinned official CLI are trusted infrastructure because they can access private mail.
@@ -33,8 +30,7 @@ This is an unofficial self-hosted project, not a Tencent-operated service. Each 
 1. Rotate `OAUTH_SIGNING_SECRET` and restart to revoke connector tokens.
 2. Revoke or reauthorize Agent Mail through Tencent's official controls.
 3. Rotate the owner code/hash pair.
-4. Remove or replace affected `MCP_CLIENT_TOKENS` entries.
-5. Rebuild from audited source and keep logs free of bodies, attachments, device URLs, credentials, and authorization headers.
+4. Rebuild from audited source and keep logs free of bodies, attachments, device URLs, credentials, and authorization headers.
 
 ## Responsible disclosure
 

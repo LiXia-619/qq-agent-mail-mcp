@@ -1,4 +1,4 @@
-# Deployment and MCP client connection
+# Deployment and ChatGPT connection
 
 ## 1. Cloud service
 
@@ -18,7 +18,6 @@ Required production variables:
 | `OAUTH_OWNER_CODE_HASH` | Generated scrypt hash |
 | `OAUTH_SIGNING_SECRET` | Independent generated signing secret |
 | `OAUTH_CLIENTS_FILE` | Optional; defaults to `/data/agently-cli/oauth-clients.json` |
-| `MCP_CLIENT_TOKENS` | Optional comma-separated `client-id:token` entries for non-OAuth clients |
 | `AGENTLY_CLI_CONFIG_DIR` | `/data/agently-cli` |
 | `AGENTLY_WORKSPACE` | `default` |
 
@@ -28,9 +27,7 @@ Open `https://YOUR_HOST/setup`, enter `OWNER_CODE`, start authorization, and com
 
 The credential, local encryption key, and OAuth client registrations share the persistent volume. A later deployment or a new ChatGPT window should not require Tencent authorization again.
 
-## 4. Add a client
-
-### ChatGPT with OAuth
+## 4. Add the ChatGPT connector
 
 Create a developer-mode app for `https://YOUR_HOST/mcp` with OAuth and select Dynamic Client Registration. The existing `mail:read mail:reply` scope pair remains compatible with v0.3 connections; `mail:reply` is the legacy name of the v0.4 connector write grant.
 
@@ -41,34 +38,12 @@ After connection, the tool list must contain exactly:
 
 Query action `capabilities` must return the complete server-side action catalog. New provider actions are added to that catalog without adding another MCP tool.
 
-### Polaris and other custom-header clients
-
-Generate a unique credential for each client:
-
-```bash
-npm run generate-client-token -- polaris
-```
-
-Append the emitted `client-id:token` entry to the deployment's `MCP_CLIENT_TOKENS` cloud secret and redeploy. Then configure the client with:
-
-| Setting | Value |
-|---|---|
-| Transport | Streamable HTTP (preferred) |
-| Server URL | `https://YOUR_HOST/mcp` |
-| Request header | `Authorization` |
-| Header value | `Bearer YOUR_TOKEN` |
-
-If a client supports only legacy SSE, use `https://YOUR_HOST/sse`; it must send the same Authorization header on both the SSE connection and the message POST. Never give another person a token for your deployment. Each mailbox owner must deploy and authorize a separate instance.
-
 ## 5. Verify before deployment
 
 Run `npm ci`, `npm run build`, and `npm test`. Then verify:
 
-- `/healthz` reports `agent-mail-gateway` v0.5.1;
+- `/healthz` reports `agent-mail-gateway` v0.4.2;
 - unauthenticated `/mcp` requests return 401;
 - mailbox identity still works without Tencent reauthorization;
 - `capabilities` returns the action catalog;
-- a named-token Streamable HTTP client lists exactly the same two tools;
-- a legacy SSE client authenticates both its event stream and message POST;
-- browser-webview preflight requests to MCP transport routes return the required CORS headers without authenticating an MCP request;
 - use only owner-controlled messages and attachments for real-mail smoke tests.

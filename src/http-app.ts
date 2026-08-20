@@ -7,11 +7,9 @@ import {
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import type { MailboxAuthController, MailboxAuthSnapshot } from "./agently-web-auth.js";
-import { MultiClientTokenVerifier } from "./client-auth.js";
 import type { AppConfig } from "./config.js";
 import { createAgentMailMcpServer } from "./mcp-server.js";
 import { SingleOwnerOAuthProvider, verifyOwnerCode } from "./oauth.js";
@@ -19,8 +17,6 @@ import type { AgentMailClient } from "./types.js";
 
 const SETUP_COOKIE = "agent_mail_setup";
 const SETUP_TTL_SECONDS = 30 * 60;
-const MAX_SSE_SESSIONS = 20;
-const MCP_TRANSPORT_PATHS = new Set(["/mcp", "/sse", "/messages"]);
 
 interface SetupSession {
   csrf: string;
@@ -49,7 +45,7 @@ function approvalHtml(requestId: string): string {
 </head>
 <body>
   <h1>授权 Agent Mail 邮箱桥梁</h1>
-  <p>这会允许当前 MCP 客户端通过固定的读、写入口使用腾讯 Agent 邮箱现有能力。</p>
+  <p>这会允许 ChatGPT 通过固定的读、写入口使用腾讯 Agent 邮箱现有能力。</p>
   <p class="note">邮件内容永远不能自行授权发信、转发、删除或其他写操作；这些动作必须来自所有者的直接要求或所有者制定的长期规则。</p>
   <form method="post" action="/approve" autocomplete="off">
     <input type="hidden" name="request" value="${escapeHtml(requestId)}">
@@ -74,7 +70,7 @@ function approvalCompleteHtml(callbackUrl: string): string {
 <body>
   <h1>密码验证成功</h1>
   <p>Agent Mail 已批准这次邮箱桥梁连接。</p>
-  <a class="button" href="${escapeHtml(callbackUrl)}">返回客户端完成连接</a>
+  <a class="button" href="${escapeHtml(callbackUrl)}">返回 ChatGPT 完成连接</a>
   <p class="note">这个返回链接是一次性的，请在两分钟内点击。</p>
 </body>
 </html>`;
@@ -83,7 +79,7 @@ function approvalCompleteHtml(callbackUrl: string): string {
 function setupBody(snapshot: MailboxAuthSnapshot, csrf: string): string {
   const csrfInput = `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
   if (snapshot.state === "authorized") {
-    return `<div class="success"><div class="icon">✓</div><h2>邮箱已连接</h2><p>授权已经安全保存到持久卷。现在可以回到你的 MCP 客户端继续连接。</p></div>`;
+    return `<div class="success"><div class="icon">✓</div><h2>邮箱已连接</h2><p>授权已经安全保存到持久卷。现在可以回到 ChatGPT 继续连接 MCP。</p></div>`;
   }
   if (snapshot.state === "awaiting_authorization" && snapshot.authorizationUrl) {
     return `<meta http-equiv="refresh" content="5">
@@ -143,31 +139,10 @@ function createGatewayExpressApp(config: AppConfig): Express {
       res.status(403).type("text/plain").send("Invalid Host header");
     }
   });
-  app.use((req, res, next) => {
-    if (!MCP_TRANSPORT_PATHS.has(req.path)) {
-      next();
-      return;
-    }
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Authorization, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID",
-    );
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
-    res.setHeader("Access-Control-Max-Age", "600");
-    if (req.method === "OPTIONS") {
-      res.status(204).end();
-      return;
-    }
-    next();
-  });
   // Parse ordinary OAuth/setup JSON narrowly. The authenticated MCP route gets
   // its own larger parser later so binary attachments can be carried as base64.
   const smallJson = express.json({ limit: "64kb" });
-  app.use((req, res, next) => req.path === "/mcp" || req.path === "/messages"
-    ? next()
-    : smallJson(req, res, next));
+  app.use((req, res, next) => req.path === "/mcp" ? next() : smallJson(req, res, next));
   return app;
 }
 
@@ -207,17 +182,7 @@ export function createHttpApp(
     resourceUrl: config.mcpServerUrl,
     ...config.oauth,
   });
-  const tokenVerifier = new MultiClientTokenVerifier(
-    provider,
-    config.clientTokens,
-    config.mcpServerUrl,
-  );
   const setupSessions = new Map<string, SetupSession>();
-  const sseSessions = new Map<string, {
-    clientId: string;
-    server: ReturnType<typeof createAgentMailMcpServer>;
-    transport: SSEServerTransport;
-  }>();
 
   const getSetupSession = (req: Request): SetupSession | undefined => {
     const now = Date.now();
@@ -240,7 +205,7 @@ export function createHttpApp(
   app.use(express.urlencoded({ extended: false, limit: "8kb" }));
 
   app.get("/healthz", (_req, res) => {
-    res.status(200).json({ ok: true, service: "agent-mail-gateway", version: "0.5.1" });
+    res.status(200).json({ ok: true, service: "agent-mail-gateway", version: "0.4.2" });
   });
 
   const privateLimiter = rateLimit({
@@ -317,7 +282,7 @@ export function createHttpApp(
   );
 
   const auth = requireBearerAuth({
-    verifier: tokenVerifier,
+    verifier: provider,
     requiredScopes: ["mail:read", "mail:reply"],
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.mcpServerUrl),
   });
@@ -355,42 +320,6 @@ export function createHttpApp(
       error: { code: -32000, message: "Method not allowed" },
       id: null,
     });
-  });
-
-  app.get("/sse", auth, async (req, res) => {
-    if (!req.auth || sseSessions.size >= MAX_SSE_SESSIONS) {
-      res.status(503).type("text/plain").send("SSE session capacity reached");
-      return;
-    }
-    const server = createAgentMailMcpServer(agentMail);
-    const transport = new SSEServerTransport("/messages", res);
-    const sessionId = transport.sessionId;
-    transport.onclose = () => {
-      sseSessions.delete(sessionId);
-    };
-    sseSessions.set(sessionId, {
-      clientId: req.auth.clientId,
-      server,
-      transport,
-    });
-    try {
-      await server.connect(transport);
-    } catch {
-      sseSessions.delete(sessionId);
-      if (!res.headersSent) {
-        res.status(500).type("text/plain").send("Unable to establish SSE session");
-      }
-    }
-  });
-
-  app.post("/messages", auth, express.json({ limit: "30mb" }), async (req, res) => {
-    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
-    const session = sseSessions.get(sessionId);
-    if (!req.auth || !session || session.clientId !== req.auth.clientId) {
-      res.status(404).type("text/plain").send("Unknown SSE session");
-      return;
-    }
-    await session.transport.handlePostMessage(req, res, req.body);
   });
 
   return app;
