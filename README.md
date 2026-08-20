@@ -4,11 +4,11 @@
 
 A single-owner, cloud-deployable MCP gateway for Tencent QQ Agent Mail. Tencent's official CLI remains the mailbox engine; this project is a remote adapter, not a second email client.
 
-Current gateway version: **v0.4.2**.
+Current gateway version: **v0.5.0**.
 
 ## Why this project exists
 
-Tencent's Agent Mail CLI runs locally, while ChatGPT custom MCP apps require a reachable remote MCP server. This project bridges that gap without exposing raw shell or CLI access. It provides a small, stable MCP surface, a browser-based mailbox authorization flow, persistent credentials, and an embedded operating guide that lets a new model window use natural-language mailbox requests safely.
+Tencent's Agent Mail CLI runs locally, while remote MCP clients require a reachable server. This project bridges that gap without exposing raw shell or CLI access. It provides a small, stable MCP surface, browser-based mailbox authorization, persistent credentials, OAuth for compatible clients, named bearer tokens for clients with custom-header support, and an embedded operating guide that lets a new model window use natural-language mailbox requests safely.
 
 This repository contains source code only. It does not provide a hosted mailbox service, shared endpoint, Tencent account, or credentials. Each operator must deploy and authorize their own private instance.
 
@@ -20,6 +20,23 @@ The MCP surface is intentionally stable and contains exactly two tools:
 Call query action `capabilities` for the live action catalog and parameter contract. Adding a provider capability updates the server-side registry instead of creating another MCP tool.
 
 The capabilities response also contains the complete operator guide: authorization boundaries, one-step direct execution, preview completion, safe search/read/reply workflows, result interpretation, retry rules, and machine-readable examples. A new model window can discover and operate the mailbox from a natural-language owner request without asking the owner to translate it into action names or JSON parameters.
+
+## Client compatibility
+
+The preferred transport is MCP Streamable HTTP at `/mcp`. A legacy SSE compatibility endpoint is also available at `/sse`, with client messages sent to `/messages`.
+
+- OAuth 2.1 with PKCE and Dynamic Client Registration remains available for ChatGPT.
+- Desktop or self-hosted clients that can set custom headers can use a separately generated named token as `Authorization: Bearer YOUR_TOKEN`.
+- Each client must have its own token. Removing that named entry from `MCP_CLIENT_TOKENS` and redeploying revokes only that client.
+- A model provider such as DeepSeek does not connect to this server directly; the MCP host discovers the two tools and supplies their schemas to the model.
+
+Generate one non-OAuth client credential at a time:
+
+```bash
+npm run generate-client-token -- polaris
+```
+
+Put the emitted `client-id:token` entry in the deployment's `MCP_CLIENT_TOKENS` secret. In the client, select Streamable HTTP, use `https://YOUR_HOST/mcp`, and add an `Authorization` request header whose value is `Bearer YOUR_TOKEN`. Never share a deployment URL together with its token, and never reuse the OAuth signing secret, owner code, or Tencent credential as a client token.
 
 ## Action coverage
 
@@ -61,6 +78,8 @@ Credentials and the CLI's encryption-key locations all live on the persistent vo
 - Watch calls are bounded to 45 seconds and return at most the first event.
 - CLI environment variables are allowlisted. Output is size-limited, sanitized recursively, and never logged.
 - Connector OAuth uses PKCE and Dynamic Client Registration. The existing `mail:read mail:reply` scope pair is retained for deployed-client compatibility; in v0.4, `mail:reply` is the legacy connector write grant and the approval page truthfully describes the full gateway.
+- Non-OAuth clients use independent, operator-provisioned bearer tokens. Tokens are compared by SHA-256 digest with timing-safe equality and are never returned by the MCP server.
+- Legacy SSE sessions are authenticated on both the event stream and message endpoint, capped at 20 concurrent sessions, and bound to the same named or OAuth client identity.
 - The official `@tencent-qqmail/agently-cli@1.0.17` package is pinned in the container image.
 
 This software can send, forward, trash, and permanently delete email when authorized. Review [`docs/SECURITY.md`](docs/SECURITY.md), use a dedicated single-owner deployment, and test with owner-controlled messages before granting access to real mail.
@@ -69,7 +88,7 @@ The ChatGPT connector OAuth and Tencent mailbox OAuth remain separate. Connectin
 
 ## Deploy
 
-The host must provide an always-on HTTPS hostname, one persistent volume mounted at `/data/agently-cli`, and one running replica for in-memory authorization records. Configure `.env.example`, deploy the included `Dockerfile`, then use `/setup`. See `docs/DEPLOYMENT.md` and `docs/SECURITY.md`.
+The host must provide an always-on HTTPS hostname, one persistent volume mounted at `/data/agently-cli`, and one running replica for in-memory authorization and legacy SSE session records. Configure `.env.example`, deploy the included `Dockerfile`, then use `/setup`. See `docs/DEPLOYMENT.md` and `docs/SECURITY.md`.
 
 ## Local verification
 
@@ -91,7 +110,8 @@ Generate deployment secrets locally with `npm run generate-secrets`. Keep the un
 | `GET/POST /setup` | Private Tencent mailbox browser setup | Owner session |
 | `POST /register`, `GET/POST /authorize`, `POST /token` | MCP connector OAuth with DCR | OAuth protocol |
 | `GET/POST /approve` | Connector owner approval | Owner code + rate limit |
-| `POST /mcp` | Stateless two-tool gateway | Bearer token |
+| `POST /mcp` | Preferred stateless Streamable HTTP gateway | OAuth or named bearer token |
+| `GET /sse`, `POST /messages` | Legacy SSE compatibility transport | Same token on both requests |
 
 ## License and third-party software
 

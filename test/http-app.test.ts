@@ -1,5 +1,9 @@
 import request from "supertest";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import type { MailboxAuthController, MailboxAuthSnapshot } from "../src/agently-web-auth.js";
 import type { AppConfig } from "../src/config.js";
@@ -34,6 +38,7 @@ const config: AppConfig = {
   publicOrigin: new URL("https://mail.example/"),
   mcpServerUrl: new URL("https://mail.example/mcp"),
   allowedHosts: ["mail.example"],
+  clientTokens: [],
   oauth: {
     clientId: "agent-mail-chatgpt",
     redirectUri: "https://chatgpt.com/connector/oauth/test-callback",
@@ -59,7 +64,7 @@ describe("HTTP security boundary", () => {
   it("exposes only a minimal health check", async () => {
     const app = createHttpApp(config, fakeMail, new FakeMailboxAuth());
     await request(app).get("/healthz").set("Host", "mail.example")
-      .expect(200, { ok: true, service: "agent-mail-gateway", version: "0.4.2" });
+      .expect(200, { ok: true, service: "agent-mail-gateway", version: "0.5.0" });
   });
 
   it("does not expose the mailbox authorization link before owner verification", async () => {
@@ -162,6 +167,48 @@ describe("HTTP security boundary", () => {
       .set("Host", "mail.example")
       .send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
       .expect(401);
+    await request(app)
+      .post("/mcp")
+      .set("Host", "mail.example")
+      .set("Authorization", `Bearer ${"X".repeat(48)}`)
+      .send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
+      .expect(401);
+    await request(app).get("/sse").set("Host", "mail.example").expect(401);
+    await request(app).post("/messages?sessionId=unknown").set("Host", "mail.example").expect(401);
+  });
+
+  it("serves the same two tools over Streamable HTTP and legacy SSE with a named bearer token", async () => {
+    const token = "P".repeat(48);
+    const liveConfig: AppConfig = {
+      ...config,
+      allowedHosts: ["127.0.0.1"],
+      clientTokens: [{ clientId: "polaris", token }],
+    };
+    const app = createHttpApp(liveConfig, fakeMail, new FakeMailboxAuth());
+    const listener = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+      const server = app.listen(0, "127.0.0.1", () => resolve(server));
+    });
+    const address = listener.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+      const transports = [
+        new StreamableHTTPClientTransport(new URL("/mcp", origin), { requestInit: { headers } }),
+        new SSEClientTransport(new URL("/sse", origin), { requestInit: { headers } }),
+      ];
+      for (const transport of transports) {
+        const client = new Client({ name: "compatibility-test", version: "1.0.0" });
+        await client.connect(transport);
+        const tools = await client.listTools();
+        expect(tools.tools.map((tool) => tool.name)).toEqual([
+          "agent_mail_query",
+          "agent_mail_execute",
+        ]);
+        await client.close();
+      }
+    } finally {
+      await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it("shows a same-origin completion page before returning to ChatGPT", async () => {
@@ -191,7 +238,7 @@ describe("HTTP security boundary", () => {
       .send({ request: requestId, owner_code: ownerCode })
       .expect(200);
     expect(completion.text).toContain("密码验证成功");
-    expect(completion.text).toContain("返回 ChatGPT 完成连接");
+    expect(completion.text).toContain("返回客户端完成连接");
     expect(completion.text).toContain("https://chatgpt.com/connector/oauth/test-callback");
   });
 
