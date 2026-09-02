@@ -12,7 +12,7 @@ const listener = app.listen(config.port, config.bindHost, () => {
   console.log(JSON.stringify({
     event: "server_started",
     service: "agent-mail-gateway",
-    version: "0.4.2",
+    version: "0.5.1",
     port: config.port,
   }));
 });

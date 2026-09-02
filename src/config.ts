@@ -4,6 +4,10 @@ export interface AppConfig {
   publicOrigin: URL;
   mcpServerUrl: URL;
   allowedHosts: string[];
+  clientTokens: Array<{
+    clientId: string;
+    token: string;
+  }>;
   oauth: {
     clientId: string;
     redirectUri: string;
@@ -18,6 +22,34 @@ export interface AppConfig {
     accessToken?: string;
     timeoutMs: number;
   };
+}
+
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function parseClientTokens(value: string | undefined): AppConfig["clientTokens"] {
+  const text = value?.trim();
+  if (!text) {
+    return [];
+  }
+  const seenIds = new Set<string>();
+  const seenTokens = new Set<string>();
+  return text.split(",").map((entry) => {
+    const separator = entry.indexOf(":");
+    const clientId = entry.slice(0, separator).trim();
+    const token = entry.slice(separator + 1).trim();
+    if (separator <= 0 || !CLIENT_ID_PATTERN.test(clientId)) {
+      throw new Error("MCP_CLIENT_TOKENS entries must use client-id:token");
+    }
+    if (!/^[A-Za-z0-9_-]{32,512}$/.test(token)) {
+      throw new Error("MCP client tokens must be 32..512 base64url characters");
+    }
+    if (seenIds.has(clientId) || seenTokens.has(token)) {
+      throw new Error("MCP client IDs and tokens must be unique");
+    }
+    seenIds.add(clientId);
+    seenTokens.add(token);
+    return { clientId, token };
+  });
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -71,6 +103,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (accessToken && accessToken === signingSecret) {
     throw new Error("Agent Mail and MCP OAuth secrets must be independent");
   }
+  const clientTokens = parseClientTokens(env.MCP_CLIENT_TOKENS);
+  if (clientTokens.some(({ token }) => token === signingSecret || token === accessToken)) {
+    throw new Error("Each MCP client token must be independent from other service secrets");
+  }
 
   return {
     bindHost: env.HOST?.trim() || "0.0.0.0",
@@ -78,6 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicOrigin,
     mcpServerUrl: new URL("/mcp", publicOrigin),
     allowedHosts: [publicOrigin.hostname],
+    clientTokens,
     oauth: {
       clientId: required(env, "OAUTH_CLIENT_ID"),
       redirectUri,
@@ -94,4 +131,3 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
   };
 }
-
